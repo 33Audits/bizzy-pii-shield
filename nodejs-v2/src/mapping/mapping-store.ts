@@ -12,6 +12,12 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { PATHS, ENV } from "../utils/config.js";
 import {
+  getMasterKey,
+  encrypt as encryptAtRest,
+  decrypt as decryptAtRest,
+  isEncrypted,
+} from "./at-rest-crypto.js";
+import {
   serializePlaceholderState,
   deserializePlaceholderState,
   reconstructPlaceholderState,
@@ -49,9 +55,28 @@ export interface MappingData {
 // In-memory primary store
 const _inMemory = new Map<string, MappingData>();
 
+// Bizzy hardening: master key lives beside the mappings dir (not inside it),
+// locked 0600 by at-rest-crypto. Prefer BIZZY_PII_MASTER_KEY from a secret
+// manager so the key never shares the disk with the ciphertext.
+const KEYFILE = path.join(path.dirname(PATHS.MAPPINGS_DIR), "at-rest.key");
+function masterKey(): Buffer {
+  return getMasterKey(KEYFILE);
+}
+
+/** Read a mapping file: decrypt our format, or parse a legacy plaintext file. */
+function readMappingFile(filePath: string): MappingData {
+  const raw = fs.readFileSync(filePath);
+  const json = isEncrypted(raw)
+    ? decryptAtRest(raw, masterKey())
+    : raw.toString("utf-8"); // legacy plaintext (pre-hardening); re-save encrypts it
+  return JSON.parse(json) as MappingData;
+}
+
 function ensureDir(): void {
   try {
-    fs.mkdirSync(PATHS.MAPPINGS_DIR, { recursive: true });
+    // 0700 owner-only; individual mapping files are written 0600.
+    fs.mkdirSync(PATHS.MAPPINGS_DIR, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(PATHS.MAPPINGS_DIR, 0o700); } catch { /* best effort */ }
   } catch {
     // will retry on save; in-memory fallback always works
   }
@@ -137,8 +162,12 @@ export function saveMapping(
     ensureDir();
     const filePath = mappingFilePath(sessionId);
     const tmpPath = filePath + ".tmp";
-    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+    // Bizzy hardening: encrypt at rest (AES-256-GCM) + 0600. The placeholder→PII
+    // map never hits disk as plaintext.
+    const blob = encryptAtRest(JSON.stringify(data, null, 2), masterKey());
+    fs.writeFileSync(tmpPath, blob, { mode: 0o600 });
     fs.renameSync(tmpPath, filePath);
+    try { fs.chmodSync(filePath, 0o600); } catch { /* best effort */ }
     diskPath = filePath;
   } catch (e) {
     console.error(`[Mapping] disk write failed (in-memory OK): ${e}`);
@@ -153,7 +182,7 @@ export function loadMapping(sessionId: string): Record<string, string> {
   try {
     const filePath = mappingFilePath(sessionId);
     if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, "utf-8")) as MappingData;
+      const data = readMappingFile(filePath);
       // Cache in memory
       _inMemory.set(sessionId, data);
       return data.mapping || {};
@@ -177,7 +206,7 @@ export function loadMappingData(sessionId: string): MappingData | null {
   try {
     const filePath = mappingFilePath(sessionId);
     if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, "utf-8")) as MappingData;
+      const data = readMappingFile(filePath);
       if (!data.metadata || typeof data.metadata !== "object") data.metadata = {};
       _inMemory.set(sessionId, data);
       return data;
