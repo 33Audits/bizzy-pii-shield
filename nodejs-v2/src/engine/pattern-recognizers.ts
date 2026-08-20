@@ -439,6 +439,34 @@ function buildRecognizers(): RecognizerDef[] {
     context: ["y-tunnus", "ytunnus", "yritystunnus", "yhteisötunnus", "business id", "FO-nummer", "VAT", "company number", "organisation number"],
   });
 
+  // ════════════════════════════════════════════════════════════
+  // Bizzy hardening: MONEY + DOB. Salary/compensation and dates of birth are
+  // sensitive in HR docs and the benchmark showed 0% recall (no pattern).
+  // Recall-first: over-redacting a stray amount/date is caught in human review;
+  // leaking a salary or DOB is not.
+  // ════════════════════════════════════════════════════════════
+  recognizers.push({
+    entityType: "MONEY",
+    patterns: [
+      // $142,500  $98,000  $6,214.55  $ 1,000
+      { name: "money_usd", regex: /\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b/g, score: 0.7 },
+      // $500.00 / $500 with decimals (no thousands sep)
+      { name: "money_usd_small", regex: /\$\s?\d+\.\d{2}\b/g, score: 0.55 },
+    ],
+    context: ["salary", "compensation", "pay", "wage", "bonus", "deposit", "amount", "annual", "base", "final pay"],
+  });
+
+  recognizers.push({
+    entityType: "DATE_OF_BIRTH",
+    patterns: [
+      // 07/14/1991  (MM/DD/YYYY)
+      { name: "dob_slash", regex: /\b(?:0?[1-9]|1[0-2])\/(?:0?[1-9]|[12]\d|3[01])\/(?:19|20)\d\d\b/g, score: 0.55 },
+      // 2015-09-02  (YYYY-MM-DD, ISO)
+      { name: "dob_iso", regex: /\b(?:19|20)\d\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b/g, score: 0.55 },
+    ],
+    context: ["dob", "date of birth", "birth", "born", "d.o.b"],
+  });
+
   return recognizers;
 }
 

@@ -58,7 +58,8 @@
     "tsc:check": "tsc --noEmit",
     "tsc:check:cli": "tsc --noEmit -p tsconfig.cli.json",
     "tsc:check:ui": "tsc --noEmit -p tsconfig.ui.json",
-    "tsc:check:all": "npm run tsc:check && npm run tsc:check:cli && npm run tsc:check:ui"
+    "tsc:check:all": "npm run tsc:check && npm run tsc:check:cli && npm run tsc:check:ui",
+    "bench": "tsx bench/pii-benchmark.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
