@@ -36,6 +36,24 @@ Legacy plaintext mapping files remain readable and are re-encrypted on next save
 - **Fallback:** a `0600` keyfile beside the mappings dir, generated on first use.
   Adds a real barrier over plaintext, but same-host — use the env key for clients.
 
+## Benchmark (recall = the leak metric)
+
+`npm run bench` runs detection over a labeled HR corpus (`nodejs-v2/bench/`) and
+reports **recall** — the % of ground-truth PII actually redacted. An unrecalled
+entity is a real leak; a false positive just over-redacts (caught in review), so
+we tune recall-first.
+
+| Config | Recall | Notes |
+|---|---|---|
+| Patterns only (baseline) | **51.5%** | names, money, DOB all leaked |
+| Patterns + MONEY/DOB recognizers | **66.7%** | money 0→100%, DOB 0→100% |
+| + GLiNER model (names) | *pending download* | remaining leaks are 9/11 names → PERSON 18% without the model |
+
+**Conclusion the benchmark forces:** GLiNER is **non-optional** for HR docs —
+patterns cannot do person names. Next: download the model, re-run, tune
+`PII_NER_THRESHOLD` (lower = more recall), and add a name gazetteer for the
+residual misses. The bench exits non-zero on any leak, so it gates CI.
+
 ## Remaining before client/HR use (tracked)
 
 1. **Network isolation** — assert the anonymize path makes zero outbound calls
